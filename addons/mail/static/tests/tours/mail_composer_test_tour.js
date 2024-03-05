@@ -1,7 +1,7 @@
 /* @odoo-module */
 
 import { registry } from "@web/core/registry";
-import { createFile, inputFiles } from "@web/../tests/utils";
+import { contains, createFile, inputFiles } from "@web/../tests/utils";
 
 /**
  * This tour depends on data created by python test in charge of launching it.
@@ -13,13 +13,20 @@ registry.category("web_tour.tours").add("mail/static/tests/tours/mail_composer_t
     test: true,
     steps: () => [
         {
+            content: "Wait for the chatter to be fully loaded",
+            trigger: ".o-mail-Chatter",
+            async run() {
+                await contains(".o-mail-Message", { count: 1 });
+            },
+        },
+        {
             content: "Click on Send Message",
             trigger: "button:contains(Send message)",
         },
         {
             content: "Write something in composer",
             trigger: ".o-mail-Composer-input",
-            run: "text blahblah @",
+            run: "text blahblah @Not",
         },
         {
             content: "Mention a partner",
@@ -65,9 +72,9 @@ registry.category("web_tour.tours").add("mail/static/tests/tours/mail_composer_t
             trigger: '[name="subject"] input',
             run() {
                 const subjectValue = document.querySelector('[name="subject"] input').value;
-                if (subjectValue !== "Ernest Employee") {
+                if (subjectValue !== "Jane") {
                     console.error(
-                        `Full composer should have "Ernest Employee" in subject input (actual: ${subjectValue})`
+                        `Full composer should have "Jane" in subject input (actual: ${subjectValue})`
                     );
                 }
             },

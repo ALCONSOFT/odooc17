@@ -165,7 +165,7 @@ publicWidget.registry.SurveyFormWidget = publicWidget.Widget.extend(SurveyPreloa
         const $target = $(event.currentTarget);
         const $choiceItemGroup = $target.closest('.o_survey_form_choice');
 
-        this._applyCommentAreaVisibility($target);
+        this._applyCommentAreaVisibility($choiceItemGroup);
         const isQuestionComplete = this._checkConditionalQuestionsConfiguration($target, $choiceItemGroup);
         if (isQuestionComplete && this.options.usersCanGoBack) {
             const isLastQuestion = this.$('button[value="finish"]').length !== 0;
@@ -1141,6 +1141,7 @@ publicWidget.registry.SurveyFormWidget = publicWidget.Widget.extend(SurveyPreloa
         // Make the form completely readonly
         const form = document.querySelector('form');
         form.querySelectorAll('input, textarea, label, td')?.forEach(node => {
+            node.blur();
             node.classList.add("pe-none");
         });
         // Replace the Submit button by a Next button

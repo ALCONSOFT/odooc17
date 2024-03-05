@@ -171,8 +171,11 @@ class ProductTemplate(models.Model):
     def _compute_product_document_count(self):
         for template in self:
             template.product_document_count = template.env['product.document'].search_count([
-                ('res_model', '=', 'product.template'),
-                ('res_id', '=', template.id),
+                '|',
+                    '&', ('res_model', '=', 'product.template'), ('res_id', '=', template.id),
+                    '&',
+                        ('res_model', '=', 'product.product'),
+                        ('res_id', 'in', template.product_variant_ids.ids),
             ])
 
     @api.depends('image_1920', 'image_1024')
@@ -546,14 +549,22 @@ class ProductTemplate(models.Model):
         searched_ids = set(templates.ids)
         # some product.templates do not have product.products yet (dynamic variants configuration),
         # we need to add the base _name_search to the results
-        # FIXME awa: this is really not performant at all but after discussing with the team
-        # we don't see another way to do it
-        tmpl_without_variant = self.browse()
-        if not limit or len(searched_ids) < limit:
-            tmpl_with_variant_ids = self._search([('product_variant_ids.active', '=', True)])
-            tmpl_without_variant = self.search([('id', 'not in', tmpl_with_variant_ids)])
-        if tmpl_without_variant:
-            domain2 = expression.AND([domain, [('id', 'in', tmpl_without_variant.ids)]])
+        tmpl_without_variant_ids = []
+        # Useless if variants is not set up as no tmpl_without_variant_ids could exist.
+        if self.env.user.has_group('product.group_product_variant') and (not limit or len(searched_ids) < limit):
+            # The ORM has to be bypassed because it would require a NOT IN which is inefficient.
+            self.env['product.product'].flush_model(['product_tmpl_id', 'active'])
+            tmpl_without_variant_ids = self.env['product.template']._search([], order='id')
+            tmpl_without_variant_ids.add_where("""
+                NOT EXISTS (
+                    SELECT product_tmpl_id
+                    FROM product_product
+                    WHERE product_product.active = true
+                        AND product_template.id = product_product.product_tmpl_id
+                )
+            """)
+        if tmpl_without_variant_ids:
+            domain2 = expression.AND([domain, [('id', 'in', tmpl_without_variant_ids)]])
             searched_ids |= set(super()._name_search(name, domain2, operator, limit, order))
 
         # re-apply product.template order + display_name
@@ -600,20 +611,33 @@ class ProductTemplate(models.Model):
                 'default_res_id': self.id,
                 'default_company_id': self.company_id.id,
             },
-            'domain': [('res_id', 'in', self.ids), ('res_model', '=', self._name)],
+            'domain': [
+                '|',
+                    '&', ('res_model', '=', 'product.template'), ('res_id', '=', self.id),
+                    '&',
+                        ('res_model', '=', 'product.product'),
+                        ('res_id', 'in', self.product_variant_ids.ids),
+            ],
             'target': 'current',
             'help': """
                 <p class="o_view_nocontent_smiling_face">
                     %s
-                </p><p>
+                </p>
+                <p>
                     %s
                     <br/>
                     %s
                 </p>
+                <p>
+                    <a class="oe_link" href="https://www.odoo.com/documentation/17.0/_downloads/5f0840ed187116c425fdac2ab4b592e1/pdfquotebuilderexamples.zip">
+                    %s
+                    </a>
+                </p>
             """ % (
                 _("Upload files to your product"),
-                _("Use this feature to store any files you would like to share with your customers."),
-                _("E.G: product description, ebook, legal notice, ..."),
+                _("Use this feature to store any files you would like to share with your customers"),
+                _("(e.g: product description, ebook, legal notice, ...)."),
+                _("Download examples")
             )
         }
 
@@ -825,7 +849,9 @@ class ProductTemplate(models.Model):
         self.ensure_one()
         return self.product_variant_ids.filtered(lambda p: p._is_variant_possible(parent_combination))
 
-    def _get_attribute_exclusions(self, parent_combination=None, parent_name=None):
+    def _get_attribute_exclusions(
+        self, parent_combination=None, parent_name=None, combination_ids=None
+    ):
         """Return the list of attribute exclusions of a product.
 
         :param parent_combination: the combination from which
@@ -834,6 +860,8 @@ class ProductTemplate(models.Model):
         :type parent_combination: recordset `product.template.attribute.value`
         :param parent_name: the name of the parent product combination.
         :type parent_name: str
+        :param list combination: The combination of the product, as a
+            list of `product.template.attribute.value` ids.
 
         :return: dict of exclusions
             - exclusions: from this product itself
@@ -852,12 +880,14 @@ class ProductTemplate(models.Model):
         archived_products = self.with_context(active_test=False).product_variant_ids.filtered(lambda l: not l.active)
         active_combinations = set(tuple(product.product_template_attribute_value_ids.ids) for product in self.product_variant_ids)
         return {
-            'exclusions': self._complete_inverse_exclusions(self._get_own_attribute_exclusions()),
+            'exclusions': self._complete_inverse_exclusions(
+                self._get_own_attribute_exclusions(combination_ids=combination_ids)
+            ),
             'archived_combinations': list(set(
                 tuple(product.product_template_attribute_value_ids.ids)
                 for product in archived_products
                 if product.product_template_attribute_value_ids and all(
-                    ptav.ptav_active
+                    ptav.ptav_active or combination_ids and ptav.id in combination_ids
                     for ptav in product.product_template_attribute_value_ids
                 )
             ) - active_combinations),
@@ -883,9 +913,11 @@ class ProductTemplate(models.Model):
 
         return result
 
-    def _get_own_attribute_exclusions(self):
+    def _get_own_attribute_exclusions(self, combination_ids=None):
         """Get exclusions coming from the current template.
 
+        :param list combination: The combination of the product, as a
+            list of `product.template.attribute.value` ids.
         Dictionnary, each product template attribute value is a key, and for each of them
         the value is an array with the other ptav that they exclude (empty if no exclusion).
         """
@@ -898,7 +930,9 @@ class ProductTemplate(models.Model):
                     lambda filter_line: filter_line.product_tmpl_id == self
                 ) for value in filter_line.value_ids if value.ptav_active
             ]
-            for ptav in product_template_attribute_values if ptav.ptav_active
+            for ptav in product_template_attribute_values if (
+                ptav.ptav_active or combination_ids and ptav.id in combination_ids
+            )
         }
 
     def _get_parent_attribute_exclusions(self, parent_combination):

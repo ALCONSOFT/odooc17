@@ -155,6 +155,33 @@ const wSnippetMenu = weSnippetEditor.SnippetsMenu.extend({
         return this._super(...arguments);
     },
     /**
+     * @override
+     */
+    _patchForComputeSnippetTemplates($html) {
+        this._super(...arguments);
+
+        // TODO adapt in master: as a stable fix we corrected the behavior of
+        // the logo button that led to an error when switching from Text to
+        // Logo. Remove me in master.
+        const logoViewName = 'website.option_header_brand_logo';
+        const logoButtonEl = $html.find(`[data-customize-website-views="${logoViewName}"]`)[0];
+        if (logoButtonEl) {
+            logoButtonEl.dataset.customizeWebsiteViews = `|website.option_header_brand_name|${logoViewName}`;
+            logoButtonEl.dataset.resetViewArch = "true";
+        }
+        const brandSelectorEl = $html.find('[data-name="option_header_brand_none"]')[0]
+            ?.closest("[data-selector]");
+        if (brandSelectorEl) {
+            brandSelectorEl.dataset.selector = brandSelectorEl.dataset.selector
+                .replace('.navbar-brand.logo', '.navbar-brand');
+        }
+
+        // TODO adapt in master: as a stable imp we added a preview for the
+        // "Effect" option of the "On Hover" animation option.
+        const hoverEffectSelectEl = $html.find('[data-set-img-shape-hover-effect]')[0];
+        delete hoverEffectSelectEl.dataset.noPreview;
+    },
+    /**
      * Depending of the demand, reconfigure they gmap key or configure it
      * if not already defined.
      *
@@ -327,10 +354,11 @@ const wSnippetMenu = weSnippetEditor.SnippetsMenu.extend({
     _addToolbar() {
         this._super(...arguments);
         this.$('#o_we_editor_toolbar_container > we-title > span').after($(`
-            <div class="btn fa fa-fw fa-2x o_we_highlight_animated_text d-none
+            <we-button class="fa fa-fw o_we_link o_we_highlight_animated_text d-none
                 ${this.$body.hasClass('o_animated_text_highlighted') ? 'fa-eye text-success' : 'fa-eye-slash'}"
                 title="${_t('Highlight Animated Text')}"
-                aria-label="Highlight Animated Text"/>
+                aria-label="Highlight Animated Text">
+            </we-button>
         `));
         this._toggleTextOptionsButton(".o_we_animate_text");
         this._toggleHighlightAnimatedTextButton();

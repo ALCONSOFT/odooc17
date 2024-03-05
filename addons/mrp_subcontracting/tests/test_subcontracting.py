@@ -21,6 +21,43 @@ class TestSubcontractingBasic(TransactionCase):
         self.assertTrue(company2.subcontracting_location_id)
         self.assertTrue(self.env.company.subcontracting_location_id != company2.subcontracting_location_id)
 
+    def test_duplicating_warehouses_recreates_their_routes_and_operation_types(self):
+        """ Duplicating a warehouse should result in the creation of new routes and operation types.
+        Not reusing the existing routes and operation types"""
+        wh_original = self.env['stock.warehouse'].search([], limit=1)
+        wh_copy = wh_original.copy(default={'name': 'Dummy Warehouse (copy)', 'code': 'Dummy'})
+
+        # Check if warehouse routes got RECREATED (instead of reused)
+        route_types = [
+            "route_ids",
+            "pbm_route_id",
+            "subcontracting_route_id",
+            "crossdock_route_id",
+            "reception_route_id",
+            "delivery_route_id"
+        ]
+        for route_type in route_types:
+            original_route_set = wh_original[route_type]
+            copy_route_set = wh_copy[route_type]
+            error_message = f"At least one {route_type} (route) got reused on duplication (should have been recreated)"
+            self.assertEqual(len(original_route_set & copy_route_set), 0, error_message)
+
+        # Check if warehouse operation types (picking.type) got RECREATED (instead of reused)
+        operation_types = [
+            "subcontracting_type_id",
+            "subcontracting_resupply_type_id",
+            "pick_type_id",
+            "pack_type_id",
+            "out_type_id",
+            "in_type_id",
+            "int_type_id"
+        ]
+        for operation_type in operation_types:
+            original_type_set = wh_original[operation_type]
+            copy_type_set = wh_copy[operation_type]
+            error_message = f"At least one {operation_type} (operation_type) got reused on duplication (should have been recreated)"
+            self.assertEqual(len(original_type_set & copy_type_set), 0, error_message)
+
 
 @tagged('post_install', '-at_install')
 class TestSubcontractingFlows(TestMrpSubcontractingCommon):
@@ -742,6 +779,7 @@ class TestSubcontractingFlows(TestMrpSubcontractingCommon):
         self.assertEqual(sum(subcontracted.mapped('qty_produced')), quantities[-1])
 
     def test_change_reception_serial(self):
+        self.env.ref('base.group_user').write({'implied_ids': [(4, self.env.ref('stock.group_production_lot').id)]})
         self.finished.tracking = 'serial'
         self.bom.consumption = 'flexible'
 
@@ -913,6 +951,8 @@ class TestSubcontractingTracking(TransactionCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        cls.env.ref('base.group_user').write({'implied_ids': [(4, cls.env.ref('stock.group_production_lot').id)]})
+
         # 1: Create a subcontracting partner
         main_company_1 = cls.env['res.partner'].create({'name': 'main_partner'})
         cls.subcontractor_partner1 = cls.env['res.partner'].create({
@@ -1301,7 +1341,7 @@ class TestSubcontractingPortal(TransactionCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-
+        cls.env.ref('base.group_user').write({'implied_ids': [(4, cls.env.ref('stock.group_production_lot').id)]})
         # 1: Create a subcontracting partner
         main_partner = cls.env['res.partner'].create({'name': 'main_partner'})
         cls.subcontractor_partner1 = cls.env['res.partner'].create({
@@ -1316,7 +1356,7 @@ class TestSubcontractingPortal(TransactionCase):
             'login': 'subcontractor',
             'password': 'subcontractor',
             'email': 'subcontractor@subcontracting.portal',
-            'groups_id': [(6, 0, [cls.env.ref('base.group_portal').id])]
+            'groups_id': [(6, 0, [cls.env.ref('base.group_portal').id, cls.env.ref('stock.group_production_lot').id])]
         })
 
         # 2. Create a BOM of subcontracting type
